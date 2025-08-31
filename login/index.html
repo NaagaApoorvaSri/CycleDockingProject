@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cycle Availability</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      text-align: center;
+      background-color: #d690c9;
+    }
+    .cycle {
+      background-color: white;
+      margin: 10px auto;
+      padding: 10px;
+      border-radius: 10px;
+      width: 300px;
+    }
+    .available {
+      color: green;
+      font-weight: bold;
+    }
+    .not-available {
+      color: red;
+      font-weight: bold;
+    }
+    .login-container, .location-container {
+      margin: 20px;
+    }
+    button {
+      margin: 5px;
+      padding: 10px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Cycle Availability</h1>
+
+  <div class="login-container" id="login-container">
+    <input type="email" id="email" placeholder="Email" /><br/>
+    <input type="password" id="password" placeholder="Password" /><br/>
+    <button onclick="login()">Login</button>
+  </div>
+
+  <div id="logout-container" style="display:none;">
+    <p id="user-email"></p>
+    <button onclick="logout()">Logout</button>
+  </div>
+
+  <div class="location-container" id="location-container" style="display:none;">
+    <label for="locationSelect">Select Location:</label>
+    <select id="locationSelect" onchange="locationSelected()">
+      <option value="">--Select--</option>
+      <option value="location1">Location 1</option>
+      <option value="location2">Location 2</option>
+      <option value="location3">Location 3</option>
+    </select>
+  </div>
+
+  <div id="cycles"></div>
+
+ <!-- (keep all HTML and style the same, skipping to script for brevity) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+  import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyA1d9_rzP2hWgFgDzvbxsCvM-7FI-XlNHA",
+    authDomain: "page-a3cca.firebaseapp.com",
+    databaseURL: "https://page-a3cca-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "page-a3cca",
+    storageBucket: "page-a3cca.appspot.com",
+    messagingSenderId: "200396595",
+    appId: "1:200396595:web:3f388a0caaccb98c227846",
+    measurementId: "G-721VXBEBEW"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const auth = getAuth(app);
+
+  let currentUser = null;
+  let currentLocation = "";
+  let statusCache = {}; // 💡 Cache statuses to prevent auto UI updates
+
+  const loginContainer = document.getElementById("login-container");
+  const logoutContainer = document.getElementById("logout-container");
+  const locationContainer = document.getElementById("location-container");
+  const userEmailP = document.getElementById("user-email");
+  const cyclesDiv = document.getElementById("cycles");
+
+  const locationToStation = {
+    location1: "station1",
+    location2: "station2",
+    location3: "station3"
+  };
+
+  onAuthStateChanged(auth, user => {
+    if (user) {
+      currentUser = user;
+      loginContainer.style.display = "none";
+      logoutContainer.style.display = "block";
+      locationContainer.style.display = "block";
+      userEmailP.textContent = "Logged in as: " + user.email;
+    } else {
+      currentUser = null;
+      loginContainer.style.display = "block";
+      logoutContainer.style.display = "none";
+      locationContainer.style.display = "none";
+      cyclesDiv.innerHTML = "";
+    }
+  });
+
+  window.login = function () {
+    const email = document.getElementById("email").value;
+    const password = document.getElementById("password").value;
+    signInWithEmailAndPassword(auth, email, password)
+      .then(() => alert("✅ Login successful"))
+      .catch(err => alert("❌ Login failed: " + err.message));
+  };
+
+  window.logout = function () {
+    signOut(auth);
+  };
+
+  window.locationSelected = function () {
+    currentLocation = document.getElementById("locationSelect").value;
+    statusCache = {}; // Clear old cache
+    if (currentLocation) {
+      displayCycles();
+    } else {
+      cyclesDiv.innerHTML = "";
+    }
+  };
+
+ function displayCycles() {
+  const stationKey = locationToStation[currentLocation];
+  if (!stationKey) return;
+
+  const statusRef = ref(db, `cycleStatus/${stationKey}`);
+  const takenRef = ref(db, `taken/${currentLocation}`);
+  const takenByRef = ref(db, `takenBy/${currentLocation}`);
+
+  // Load once – don't update automatically again
+  onValue(statusRef, statusSnap => {
+    const statusData = statusSnap.val();
+    if (!statusData) return;
+
+    onValue(takenRef, takenSnap => {
+      const takenData = takenSnap.val() || {};
+
+      onValue(takenByRef, takenBySnap => {
+        const takenByData = takenBySnap.val() || {};
+
+        cyclesDiv.innerHTML = "";
+
+        for (const cycle in statusData) {
+          const cycleStatus = statusData[cycle];
+          const isTaken = takenData[cycle] === "taken";
+          const isTakenByCurrentUser = takenByData[cycle] === currentUser.email;
+
+          const div = document.createElement("div");
+          div.className = "cycle";
+          div.innerHTML = `
+            <h3>${cycle}</h3>
+            <p>Status: <span class="${cycleStatus === 'Available' ? 'available' : 'not-available'}">${cycleStatus}</span></p>
+            <div id="buttons-${cycle}" style="display: flex; justify-content: center; gap: 10px;"></div>
+          `;
+          cyclesDiv.appendChild(div);
+
+          const container = document.getElementById(`buttons-${cycle}`);
+          container.innerHTML = "";
+
+          // Show buttons based on user-driven state
+          if (cycleStatus === "Available" && !isTaken) {
+            // Initial Take button
+            const takeBtn = document.createElement("button");
+            takeBtn.textContent = "Take";
+            takeBtn.onclick = () => {
+              set(ref(db, `taken/${currentLocation}/${cycle}`), "taken");
+              set(ref(db, `takenBy/${currentLocation}/${cycle}`), currentUser.email);
+              set(ref(db, `cycleStatus/${stationKey}/${cycle}`), "Not Available");
+
+              // Manually re-render this cycle block
+              displayCycles(); // Rerun to show "Dock" button
+            };
+            container.appendChild(takeBtn);
+          } else if (isTaken && isTakenByCurrentUser) {
+            // Show Dock button only if user took it
+            const dockBtn = document.createElement("button");
+            dockBtn.textContent = "Dock";
+            dockBtn.onclick = () => {
+              set(ref(db, `taken/${currentLocation}/${cycle}`), "dock");
+              set(ref(db, `takenBy/${currentLocation}/${cycle}`), "");
+              set(ref(db, `cycleStatus/${stationKey}/${cycle}`), "Available");
+
+              // Rerun to show Take again
+              displayCycles();
+            };
+            container.appendChild(dockBtn);
+          }
+          // If taken by someone else: no buttons shown
+        }
+      }, { onlyOnce: true });
+    }, { onlyOnce: true });
+  }, { onlyOnce: true });
+}
+
+
+  function addButtons(cycle, status) {
+    const container = document.getElementById(`buttons-${cycle}`);
+    container.innerHTML = "";
+
+    const updateStatusUI = (newStatus) => {
+      statusCache[cycle] = newStatus; // 💡 Manually update cache
+      const statusSpan = container.parentElement.querySelector("span");
+      statusSpan.textContent = newStatus;
+      statusSpan.className = newStatus === "Available" ? "available" : "not-available";
+      addButtons(cycle, newStatus); // Refresh buttons
+    };
+
+    if (status === "Available") {
+      const takeBtn = document.createElement("button");
+      takeBtn.textContent = "Take";
+      takeBtn.onclick = () => {
+        set(ref(db, `take/${currentLocation}/${cycle}`), "taken");
+        set(ref(db, `taken/${currentLocation}/${cycle}`), "taken");
+        set(ref(db, `takenBy/${currentLocation}/${cycle}`), currentUser.email);
+        set(ref(db, `cycleStatus/${locationToStation[currentLocation]}/${cycle}`), "Not Available");
+        updateStatusUI("Not Available");
+      };
+      container.appendChild(takeBtn);
+    } else {
+      const dockBtn = document.createElement("button");
+      dockBtn.textContent = "Dock";
+      dockBtn.onclick = () => {
+        set(ref(db, `take/${currentLocation}/${cycle}`), "dock");
+        set(ref(db, `taken/${currentLocation}/${cycle}`), "dock");
+        set(ref(db, `takenBy/${currentLocation}/${cycle}`), "");
+        set(ref(db, `cycleStatus/${locationToStation[currentLocation]}/${cycle}`), "Available");
+        updateStatusUI("Available");
+      };
+      container.appendChild(dockBtn);
+    }
+  }
+</script>
+
+</body>
+</html>
