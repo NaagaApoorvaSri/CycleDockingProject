@@ -52,8 +52,8 @@ void setup() {
   config.api_key = API_KEY;
   config.database_url = DATABASE_URL;
 
-  auth.user.email = "apoorva1276@gmail.com";
-  auth.user.password = "12thjune2006";
+  auth.user.email = "";
+  auth.user.password = "";
 
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
